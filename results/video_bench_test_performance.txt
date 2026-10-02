@@ -1,0 +1,20 @@
+FSOC COARSE-POINTING PERFORMANCE REPORT
+============================================
+Run: video_ai   frames: 300   simulated: 10.0 s
+
+Acquisition time (s)                  0.067   target <= 2       PASS
+Tracking error mean (px)               0.16   target <= 10      PASS
+Centroiding error RMSE (px)           0.247   target (minimise) PASS
+Target loss (%)                         0.7   target < 5        PASS
+Re-acquisition time (s)               0.033   target <= 1       PASS
+Processing speed (FPS)                380.9   target >= 20      PASS
+
+pointing_err_rmse_px             0.17
+pointing_err_max_px              0.36
+pointing_within_10px_pct         100.0
+centroid_err_mean_px             0.218
+centroid_err_max_px              0.613
+lock_retention_pct               99.3
+reacquisition_times_s            [0.033]
+proc_time_mean_ms                2.63
+proc_time_p99_ms                 12.27
