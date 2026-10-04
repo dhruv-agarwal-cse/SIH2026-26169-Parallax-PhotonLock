@@ -30,6 +30,10 @@ from fsoctrack.vision import load_model
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(ROOT, "results")
+PANEL_W = 400          # left control panel width (px)
+CAM_TITLE = "VIRTUAL CAMERA  640 × 480   ·   orange = SEARCH, green = TRACK, yellow = COAST"
+MAP_TITLE = "SCREEN 2000 × 2000   ·   red = beacon, green box = camera FOV, click to move the beacon"
+WORLD_W = 380          # SCREEN map size (px)
 
 PRESETS = {
     "Custom": {},
@@ -88,48 +92,69 @@ class Main(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         lay = QtWidgets.QHBoxLayout(central)
-        # ---------- left: controls
+        lay.setContentsMargins(10, 8, 10, 6)
+        lay.setSpacing(14)
+        self._slider_labels = []
+
+        # ---------- left: controls (fixed width, vertical scroll only if the screen is short)
         panel = QtWidgets.QWidget()
         pl = QtWidgets.QVBoxLayout(panel)
+        pl.setContentsMargins(0, 0, 6, 0)
+        pl.setSpacing(6)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidget(panel)
         scroll.setWidgetResizable(True)
-        scroll.setFixedWidth(400)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll.setFixedWidth(PANEL_W)
         lay.addWidget(scroll)
 
-        bar = QtWidgets.QGridLayout()
         self.b_run = QtWidgets.QPushButton("▶  Start")
         self.b_run.clicked.connect(self.toggle_run)
-        b_reset = QtWidgets.QPushButton("⟲  Reset / new target")
+        self.b_run.setStyleSheet("font-weight:bold")
+        b_reset = QtWidgets.QPushButton("⟲  Reset")
         b_reset.clicked.connect(self.reset)
-        b_occ = QtWidgets.QPushButton("☁  Occlude beacon 1 s")
+        b_occ = QtWidgets.QPushButton("☁  Occlude 1 s")
         b_occ.clicked.connect(lambda: self.sim.occlude(1.0))
-        self.b_video = QtWidgets.QPushButton("🎞  Load MP4 (Benchmark-2)")
-        self.b_video.clicked.connect(self.load_video)
-        b_save = QtWidgets.QPushButton("💾  Save performance report")
+        self.b_video = QtWidgets.QPushButton("🎞  Load MP4")
+        self.b_video.clicked.connect(lambda: self.load_video())
+        b_save = QtWidgets.QPushButton("💾  Save report")
         b_save.clicked.connect(self.save_report)
-        self.b_rec = QtWidgets.QPushButton("⏺  Record screen to MP4")
+        self.b_rec = QtWidgets.QPushButton("⏺  Record MP4")
         self.b_rec.setCheckable(True)
         self.b_rec.toggled.connect(self.toggle_record)
-        for i, b in enumerate([self.b_run, b_reset, b_occ, self.b_video, b_save, self.b_rec]):
+        tips = ["Run / pause the 30 Hz loop", "Reset: new random beacon position and trajectory",
+                "Hide the beacon for one second: watch COAST and re-acquisition",
+                "Benchmark-2: track a video file instead of the simulator (PTZ control bypassed)",
+                "Save the performance report: results/live_<time>_performance.txt / .json / _frames.csv",
+                "Record this window to an MP4 in results/ (click again to stop)"]
+        bar = QtWidgets.QGridLayout()
+        bar.setHorizontalSpacing(6)
+        bar.setVerticalSpacing(6)
+        for i, (b, t) in enumerate(zip([self.b_run, b_reset, b_occ, self.b_video, b_save, self.b_rec], tips)):
             b.setMinimumHeight(30)
-            bar.addWidget(b, i, 0)
+            b.setToolTip(t)
+            bar.addWidget(b, i // 2, i % 2)
         pl.addLayout(bar)
 
         def group(title):
             g = QtWidgets.QGroupBox(title)
             f = QtWidgets.QFormLayout(g)
-            f.setLabelAlignment(QtCore.Qt.AlignLeft)
+            f.setContentsMargins(10, 8, 10, 8)
+            f.setHorizontalSpacing(10)
+            f.setVerticalSpacing(5)
+            f.setLabelAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+            f.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
             pl.addWidget(g)
             return f
 
         f = group("Scenario")
-        self.w_preset = QtWidgets.QComboBox()
-        self.w_preset.addItems(PRESETS.keys())
+        self.w_preset = self._combo(PRESETS.keys())
+        self.w_preset.setToolTip("One-click benchmark scenarios. Changing any setting below switches this back to Custom.")
         self.w_preset.currentTextChanged.connect(self.apply_preset)
         f.addRow("Preset", self.w_preset)
-        self.w_motion = QtWidgets.QComboBox()
-        self.w_motion.addItems(MOTIONS)
+        self.w_motion = self._combo(MOTIONS)
         f.addRow("Target motion", self.w_motion)
         self.w_speed = self._dspin(0.2, 4.0, 0.1, " °/s")
         f.addRow("Target speed", self.w_speed)
@@ -138,6 +163,7 @@ class Main(QtWidgets.QMainWindow):
         self.w_decoys = self._spin(0, 6, "")
         f.addRow("Decoy beacons", self.w_decoys)
         self.w_cue = QtWidgets.QCheckBox("Telemetry (GPS) cue for acquisition")
+        self.w_cue.setToolTip("Off = blind spiral search over the whole scene")
         f.addRow(self.w_cue)
 
         f = group("Camera")
@@ -149,43 +175,39 @@ class Main(QtWidgets.QMainWindow):
         f.addRow("Max tilt speed", self.w_tilt)
 
         f = group("Image noise")
-        self.w_gauss = QtWidgets.QCheckBox("Gaussian")
-        self.w_gsig = self._slider(0, 20)
-        f.addRow(self.w_gauss, self.w_gsig)
-        self.w_sp = QtWidgets.QCheckBox("Salt && Pepper")
-        self.w_spf = self._slider(0, 20)
-        f.addRow(self.w_sp, self.w_spf)
+        self.w_gauss = QtWidgets.QCheckBox("Gaussian σ")
+        self.w_gsig, row = self._slider(0, 20, "{}")
+        f.addRow(self.w_gauss, row)
+        self.w_sp = QtWidgets.QCheckBox("Salt && pepper")
+        self.w_spf, row = self._slider(0, 20, "{} %")
+        f.addRow(self.w_sp, row)
         self.w_poi = QtWidgets.QCheckBox("Poisson (shot noise)")
         f.addRow(self.w_poi)
 
         f = group("Atmosphere && platform")
-        self.w_weather = QtWidgets.QComboBox()
-        self.w_weather.addItems(WEATHERS)
+        self.w_weather = self._combo(WEATHERS)
         f.addRow("Weather", self.w_weather)
-        self.w_turb = self._slider(0, 60)
-        f.addRow("Turbulence", self.w_turb)
-        self.w_jit = self._slider(0, 20)
-        f.addRow("Camera jitter ±px", self.w_jit)
-        self.w_pmode = QtWidgets.QComboBox()
-        self.w_pmode.addItems(PLATFORM_MODES)
+        self.w_turb, row = self._slider(0, 60, "{}")
+        f.addRow("Turbulence", row)
+        self.w_jit, row = self._slider(0, 20, "±{} px")
+        f.addRow("Camera jitter", row)
+        self.w_pmode = self._combo(PLATFORM_MODES)
         f.addRow("Platform motion", self.w_pmode)
-        self.w_ppx = self._slider(0, 20)
-        f.addRow("Platform px/frame", self.w_ppx)
+        self.w_ppx, row = self._slider(0, 20, "{} px/f")
+        f.addRow("Platform speed", row)
 
-        f = group("Tracker")
-        self.w_mode = QtWidgets.QComboBox()
-        for lab, _ in MODES:
-            self.w_mode.addItem(lab)
-        f.addRow("Detector", self.w_mode)
+        f = group("Detector")
+        self.w_mode = self._combo([lab for lab, _ in MODES])
+        f.addRow(self.w_mode)
         self.l_model = QtWidgets.QLabel()
         self.l_model.setWordWrap(True)
         self.l_model.setStyleSheet("color:#9fb3c8;font-size:11px")
         f.addRow(self.l_model)
-        pl.addStretch(1)
-        hint = QtWidgets.QLabel("Tip: click the SCREEN map to move the beacon. Change any setting while it runs.")
+        hint = QtWidgets.QLabel("Click anywhere on the SCREEN map to move the beacon. Every setting can be changed while it runs.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#9fb3c8;font-size:11px")
         pl.addWidget(hint)
+        pl.addStretch(1)
 
         for w in [self.w_motion, self.w_weather, self.w_pmode, self.w_mode]:
             w.currentIndexChanged.connect(self.on_change)
@@ -198,7 +220,8 @@ class Main(QtWidgets.QMainWindow):
 
         # ---------- centre: camera + plot
         mid = QtWidgets.QVBoxLayout()
-        self.l_title = QtWidgets.QLabel("VIRTUAL CAMERA  640×480")
+        mid.setSpacing(6)
+        self.l_title = QtWidgets.QLabel(CAM_TITLE)
         self.l_title.setStyleSheet("font-weight:bold;color:#e6edf3")
         mid.addWidget(self.l_title)
         self.l_cam = QtWidgets.QLabel()
@@ -210,31 +233,53 @@ class Main(QtWidgets.QMainWindow):
         mid.addStretch(1)
         lay.addLayout(mid)
 
-        # ---------- right: world + stats
+        # ---------- right: world map + stats (takes whatever width is left)
         right = QtWidgets.QVBoxLayout()
-        self.l_wtitle = QtWidgets.QLabel("SCREEN 2000×2000  (red = beacon, green box = camera FOV)")
+        right.setSpacing(6)
+        self.l_wtitle = QtWidgets.QLabel(MAP_TITLE)
         self.l_wtitle.setStyleSheet("font-weight:bold;color:#e6edf3")
+        self.l_wtitle.setWordWrap(True)
         right.addWidget(self.l_wtitle)
         self.l_world = ClickLabel()
-        self.l_world.setFixedSize(380, 380)
+        self.l_world.setFixedSize(WORLD_W, WORLD_W)
+        self.l_world.setCursor(QtCore.Qt.CrossCursor)
         self.l_world.clicked.connect(self.on_world_click)
-        right.addWidget(self.l_world)
+        right.addWidget(self.l_world, 0, QtCore.Qt.AlignLeft)
         self.t_stats = QtWidgets.QTableWidget(0, 3)
         self.t_stats.setHorizontalHeaderLabels(["Metric", "Value", "PS spec"])
         self.t_stats.verticalHeader().setVisible(False)
-        self.t_stats.horizontalHeader().setStretchLastSection(True)
-        self.t_stats.setColumnWidth(0, 170)
-        self.t_stats.setColumnWidth(1, 95)
+        self.t_stats.verticalHeader().setDefaultSectionSize(24)
+        hh = self.t_stats.horizontalHeader()
+        hh.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        hh.setSectionResizeMode(1, QtWidgets.QHeaderView.Fixed)
+        hh.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
+        self.t_stats.setColumnWidth(1, 110)
+        self.t_stats.setColumnWidth(2, 90)
+        self.t_stats.setShowGrid(False)
+        self.t_stats.setAlternatingRowColors(True)
+        self.t_stats.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.t_stats.setFocusPolicy(QtCore.Qt.NoFocus)
         self.t_stats.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.t_stats.setFixedWidth(380)
-        right.addWidget(self.t_stats)
-        lay.addLayout(right)
+        self.t_stats.setMinimumWidth(WORLD_W)
+        self.t_stats.setToolTip("Cumulative since the last Reset. Green = within the PS limit, red = outside it.")
+        right.addWidget(self.t_stats, 1)
+        lay.addLayout(right, 1)
         self.statusBar().showMessage("Ready. Press Start.")
+
+    def _combo(self, items):
+        w = QtWidgets.QComboBox()
+        w.addItems(list(items))
+        # keep the long preset / detector names from forcing the whole panel wider
+        w.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        w.setMinimumContentsLength(12)
+        w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        return w
 
     def _spin(self, a, b, suf):
         w = QtWidgets.QSpinBox()
         w.setRange(a, b)
         w.setSuffix(suf)
+        w.setMaximumWidth(130)
         return w
 
     def _dspin(self, a, b, st, suf):
@@ -242,12 +287,32 @@ class Main(QtWidgets.QMainWindow):
         w.setRange(a, b)
         w.setSingleStep(st)
         w.setSuffix(suf)
+        w.setMaximumWidth(130)
         return w
 
-    def _slider(self, a, b):
-        w = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        w.setRange(a, b)
-        return w
+    def _slider(self, a, b, fmt):
+        """Slider with its current value shown beside it. Returns (slider, row_widget)."""
+        s = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        s.setRange(a, b)
+        s.setMinimumWidth(80)
+        lab = QtWidgets.QLabel()
+        lab.setMinimumWidth(58)
+        lab.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        lab.setStyleSheet("color:#9fb3c8")
+        row = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        h.addWidget(s, 1)
+        h.addWidget(lab)
+        s.valueChanged.connect(lambda v, l=lab, f=fmt: l.setText(f.format(v)))
+        lab.setText(fmt.format(s.value()))
+        self._slider_labels.append((s, lab, fmt))
+        return s, row
+
+    def _refresh_slider_labels(self):
+        for s, lab, fmt in self._slider_labels:
+            lab.setText(fmt.format(s.value()))
 
     # ================================================================== parameters
     def _sync_widgets(self):
@@ -279,6 +344,7 @@ class Main(QtWidgets.QMainWindow):
         self.w_mode.setCurrentIndex([m for _, m in MODES].index(self.sim.mode))
         for w in ws:
             w.blockSignals(False)
+        self._refresh_slider_labels()
         self._model_label()
 
     def _model_label(self):
@@ -314,6 +380,9 @@ class Main(QtWidgets.QMainWindow):
         if mode == "ai" and self.model is None:
             mode = "classical"
             self.statusBar().showMessage("AI model missing: run python train.py first. Using Classical.")
+        if mode != self.sim.mode and not self.video:
+            self.sim.restart_stats()
+            self.statusBar().showMessage(f"Detector switched to {mode.upper()}. Statistics restarted.")
         self.sim.mode = mode
         if self.video:
             self.video.det.mode = mode
@@ -332,7 +401,11 @@ class Main(QtWidgets.QMainWindow):
             self.cfg.pan_speed_dps = self.cfg.tilt_speed_dps = 5.0
         self._sync_widgets()
         self.sim.apply()
-        self.statusBar().showMessage(f"Preset applied: {name}")
+        if name != "Custom" and not self.video:
+            self.sim.restart_stats()
+            self.statusBar().showMessage(f"Preset applied: {name}. Statistics restarted for this scenario.")
+        else:
+            self.statusBar().showMessage(f"Preset applied: {name}")
 
     # ================================================================== actions
     def toggle_run(self):
@@ -343,8 +416,8 @@ class Main(QtWidgets.QMainWindow):
         if self.video:
             self.video = None
             self.cfg.fps = 30.0
-            self.l_title.setText("VIRTUAL CAMERA  640×480")
-            self.l_wtitle.setText("SCREEN 2000×2000  (red = beacon, green box = camera FOV)")
+            self.l_title.setText(CAM_TITLE)
+            self.l_wtitle.setText(MAP_TITLE)
         self.sim.reset(new_seed=True)
         self.sim.apply()
         self.statusBar().showMessage("Reset: new random target position and trajectory.")
@@ -356,8 +429,9 @@ class Main(QtWidgets.QMainWindow):
         self.sim.teleport((fx * self.cfg.world_w, fy * self.cfg.world_h))
         self.statusBar().showMessage("Beacon moved: watch COAST → SEARCH → re-acquisition.")
 
-    def load_video(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open benchmark video", ROOT, "Video (*.mp4 *.avi *.mov)")
+    def load_video(self, path=None):
+        if not path:
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open benchmark video", ROOT, "Video (*.mp4 *.avi *.mov)")
         if not path:
             return
         try:
@@ -442,7 +516,7 @@ class Main(QtWidgets.QMainWindow):
             view = cv2.resize(view, (640, 480))
             x0 = y0 = 0
         self.l_cam.setPixmap(qimg(draw_camera(view, out, self.cfg.target_size, False, offset=(x0, y0))))
-        thumb = cv2.cvtColor(cv2.resize(g, (380, 380)), cv2.COLOR_GRAY2BGR)
+        thumb = cv2.cvtColor(cv2.resize(g, (WORLD_W, WORLD_W)), cv2.COLOR_GRAY2BGR)
         sx, sy = 380 / W, 380 / H
         for i in range(1, len(self.video.trail)):
             a, b = self.video.trail[i - 1], self.video.trail[i]
@@ -471,9 +545,23 @@ class Main(QtWidgets.QMainWindow):
         spec = {"acquisition_time_s": "≤ 2 s", "pointing_err_mean_px": "≤ 10 px", "centroid_err_rmse_px": "minimise",
                 "target_loss_pct": "< 5 %", "reacquisition_max_s": "≤ 1 s", "processing_fps": "≥ 20"}
         rows = now
+        t_sim = s["sim_duration_s"]
         for k, lab, _, ok in SPEC:
             v = s.get(k)
-            rows.append((lab, "-" if v is None else f"{v}", spec[k], ok(v)))
+            txt, good = ("-" if v is None else f"{v}"), ok(v)
+            if k == "acquisition_time_s" and v is None:
+                txt, good = ("NOT ACQUIRED" if t_sim > 2 else "searching…"), t_sim <= 2
+            elif k == "target_loss_pct" and v is not None and s.get("acquisition_time_s") is None:
+                txt = f"{v}  (never locked)"
+            elif k == "reacquisition_max_s":
+                pend, nev = s.get("reacquisition_pending_s"), s.get("reacquisition_events", 0)
+                if pend is not None:
+                    txt, good = f"LOST for {pend:.1f} s", pend <= 1
+                elif v is None:
+                    txt, good = "no loss yet", True
+                else:
+                    txt = f"{v}  (worst of {nev})"
+            rows.append((lab, txt, spec[k], good))
         rows += [("RMSE tracking error (px)", str(s.get("pointing_err_rmse_px", "-")), ""),
                  ("Lock retention (%)", str(s.get("lock_retention_pct", "-")), ""),
                  ("Frames within 10 px (%)", str(s.get("pointing_within_10px_pct", "-")), ""),
@@ -495,6 +583,17 @@ class Main(QtWidgets.QMainWindow):
         super().closeEvent(e)
 
 
+STYLE = """
+QGroupBox { border: 1px solid #263241; border-radius: 6px; margin-top: 14px; padding-top: 4px; font-weight: bold; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #9fd3d8; }
+QPushButton { padding: 4px 8px; border-radius: 4px; }
+QPushButton:checked { background: #7a1f1f; }
+QTableWidget { border: 1px solid #263241; gridline-color: #263241; }
+QHeaderView::section { background: #1f2937; color: #e6edf3; padding: 4px; border: none; }
+QToolTip { color: #e6edf3; background: #1f2937; border: 1px solid #39506b; }
+"""
+
+
 def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -504,8 +603,9 @@ def main():
                       (QtGui.QPalette.ButtonText, "#e6edf3"), (QtGui.QPalette.Highlight, "#1b998b")]:
         pal.setColor(role, QtGui.QColor(col))
     app.setPalette(pal)
+    app.setStyleSheet(STYLE)
     w = Main()
-    w.resize(1480, 880)
+    w.resize(1500, 900)
     w.show()
     sys.exit(app.exec())
 

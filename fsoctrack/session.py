@@ -36,20 +36,23 @@ class SimSession:
         self.det = Detector(cfg.target_size, mode=self.mode, model=self.model)
         self.offset = np.zeros(2)
         self.tgt = self.motion.step()
-        cue = self.tgt + self.rng.normal(0, cfg.cue_sigma_px, 2) if cfg.cued else None
+        self.cue_bias = self.rng.normal(0, cfg.cue_sigma_px, 2)   # slowly varying telemetry error (GPS-like)
+        cue = self.tgt + self.cue_bias if cfg.cued else None
+        self.drift = np.zeros(2)
         self.ptr = CoarsePointer(cfg, self.det, cue=cue, cue_fn=self._cue)
         self.rec = Recorder(cfg, "live")
-        self.drift = np.zeros(2)
         self.k = 0
         self.trail, self.err = [], []
         self.occl_until = -1
+        self._teleported = False
         self._sig = self._motion_sig()
 
     def _cue(self):
         """Telemetry cue after a loss (GPS/INS position of the remote terminal, ~1 deg error)."""
         if not self.cfg.cued:
             return self.ptr.kf.pos
-        return self.tgt - self.drift + self.rng.normal(0, self.cfg.cue_sigma_px, 2)
+        self.cue_bias = 0.98 * self.cue_bias + self.rng.normal(0, 0.2 * self.cfg.cue_sigma_px, 2)
+        return self.tgt - self.drift + self.cue_bias
 
     def _motion_sig(self):
         c = self.cfg
@@ -77,11 +80,17 @@ class SimSession:
                     "v": self.rng.normal(0, 1.5, 2), "size": float(self.rng.choice([3, 4, 24, 30])),
                     "amp": self.rng.uniform(110, 230)})
 
+    def restart_stats(self, label="live"):
+        """Start a fresh performance log (used when the scenario or detector changes mid-run)."""
+        self.rec = Recorder(self.cfg, label)
+        self.err = []
+
     def teleport(self, xy):
         """Move the beacon instantly (tests loss + re-acquisition)."""
         xy = np.asarray(xy, float)
         self.offset = self.offset + (xy - self.tgt)
         self.tgt = xy
+        self._teleported = True
 
     def occlude(self, seconds=1.0):
         self.occl_until = self.k + int(seconds * self.cfg.fps)
@@ -104,9 +113,10 @@ class SimSession:
         in_fov = (0 <= gt[0] < cfg.cam_w) and (0 <= gt[1] < cfg.cam_h)
         cerr = float(np.linalg.norm(m - gt)) if (m is not None and in_fov and not occluded) else None
         self.rec.add(k=self.k, t=round(self.k / cfg.fps, 4), state=out["state"], occluded=bool(occluded),
-                     gt_x=round(float(gt[0]), 3), gt_y=round(float(gt[1]), 3),
+                     teleport=self._teleported, gt_x=round(float(gt[0]), 3), gt_y=round(float(gt[1]), 3),
                      meas_x=None if m is None else round(float(m[0]), 3), meas_y=None if m is None else round(float(m[1]), 3),
                      cent_err=cerr, point_err=perr, proc_ms=proc_ms, prob=round(out["prob"], 3))
+        self._teleported = False
         self.drift = self.drift + self.plat.step()
         self.trail.append(self.tgt.copy())
         self.trail = self.trail[-240:]

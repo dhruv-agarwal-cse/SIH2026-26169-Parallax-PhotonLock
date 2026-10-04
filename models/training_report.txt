@@ -1,6 +1,6 @@
 {
- "samples": 34535,
- "positives": 3546,
+ "samples": 34534,
+ "positives": 3545,
  "scenes": 150,
  "features": [
   "area_n",
@@ -14,62 +14,62 @@
   "log_peak",
   "ratio_peak_mean"
  ],
- "accuracy": 0.997336113041464,
- "precision": 0.990909090909091,
- "recall": 0.9830890642615558,
- "f1": 0.9869835880022637,
+ "accuracy": 0.9974519342135743,
+ "precision": 0.9931506849315068,
+ "recall": 0.981941309255079,
+ "f1": 0.9875141884222475,
  "confusion": [
   [
-   7739,
-   8
+   7742,
+   6
   ],
   [
-   15,
-   872
+   16,
+   870
   ]
  ],
  "epochs": 77,
- "final_loss": 0.00447411733567001,
+ "final_loss": 0.0048922624711104385,
  "validation": [
   {
    "scenario": "figure8 + S&P 10% + Poisson",
    "classical": {
-    "loss_pct": 59.29,
-    "track_err_px": 487.58,
-    "centroid_rmse_px": 0.129
+    "loss_pct": 45.06,
+    "track_err_px": 411.43,
+    "centroid_rmse_px": 0.122
    },
    "ai": {
-    "loss_pct": 0.4,
-    "track_err_px": 3.04,
+    "loss_pct": 1.19,
+    "track_err_px": 3.28,
     "centroid_rmse_px": 0.118
    }
   },
   {
    "scenario": "random + rain + 4 decoys",
    "classical": {
-    "loss_pct": 59.06,
-    "track_err_px": 712.83,
-    "centroid_rmse_px": 0.085
+    "loss_pct": 41.73,
+    "track_err_px": 283.6,
+    "centroid_rmse_px": 0.091
    },
    "ai": {
     "loss_pct": 0.0,
-    "track_err_px": 3.72,
+    "track_err_px": 3.67,
     "centroid_rmse_px": 0.095
    }
   },
   {
    "scenario": "circle + fog + all noise",
    "classical": {
-    "loss_pct": 1.16,
-    "track_err_px": 3.25,
-    "centroid_rmse_px": 0.385
+    "loss_pct": 0.0,
+    "track_err_px": 3.07,
+    "centroid_rmse_px": 0.389
    },
    "ai": {
     "loss_pct": 0.0,
-    "track_err_px": 3.44,
-    "centroid_rmse_px": 0.37
+    "track_err_px": 3.41,
+    "centroid_rmse_px": 0.39
    }
   }
  ],
- "train_time_s": 170.8
+ "train_time_s": 81.9
 }
